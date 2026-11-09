@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Ovicx Q200 Кокпит</string>
+    <string name="nav_cockpit">Кокпит</string>
+    <string name="nav_calisthenics">Калистеника</string>
+    <string name="nav_history">История и РП</string>
+    <string name="start_workout">Начать велотренировку</string>
+    <string name="skip_one_tap">Пропустить в 1 касание</string>
+    <string name="ticket_prompt">Сделай 1 сухой подход до седла — запишем в дневной объём?</string>
+    <string name="ticket_post_prompt">Отличная сессия! Запишем финальный сухой подход в дневной объём?</string>
+    <string name="pause">Пауза</string>
+    <string name="resume">Продолжить</string>
+    <string name="next_step">Следующий шаг</string>
+    <string name="minus_10_sec">-10 сек</string>
+    <string name="plus_10_sec">+10 сек</string>
+    <string name="finish_workout">Завершить</string>
+</resources>

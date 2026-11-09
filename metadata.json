@@ -1,0 +1,6 @@
+{
+  "name": "Ovicx Q200 Кокпит",
+  "description": "Бортовой компьютер для спин-байка DFC Ovicx Q200-O и офлайн-трекер калистеники без закисления в эстетике Дитера Рамса.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
