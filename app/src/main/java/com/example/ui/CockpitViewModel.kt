@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
 import android.os.SystemClock
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -16,7 +17,6 @@ import com.example.data.model.BandExerciseType
 import com.example.data.model.CalisthenicsExercise
 import com.example.data.model.FlattenedWorkoutStep
 import com.example.data.model.PresetWorkouts
-import com.example.data.model.WorkoutBlock
 import com.example.data.model.WorkoutProgram
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -37,6 +37,15 @@ enum class TicketSheetMode {
     PRE_WORKOUT,
     POST_WORKOUT
 }
+
+data class PendingWorkoutFinishState(
+    val isVisible: Boolean = false,
+    val workoutId: String = "",
+    val workoutTitle: String = "",
+    val durationSec: Int = 0,
+    val selectedLegFeeling: String = "Плотно",
+    val selectedRpShiftDegrees: Int = 0
+)
 
 data class ActiveWorkoutHudState(
     val isActive: Boolean = false,
@@ -126,11 +135,26 @@ class CockpitViewModel(
     private val audioHapticEngine: AudioHapticEngine
 ) : AndroidViewModel(application) {
 
+    private val prefs = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
     private val _selectedProgramId = MutableStateFlow(PresetWorkouts.allPresets.first().id)
     val selectedProgramId: StateFlow<String> = _selectedProgramId.asStateFlow()
 
-    private val _hudState = MutableStateFlow(ActiveWorkoutHudState())
+    private val _hudState = MutableStateFlow(
+        ActiveWorkoutHudState(
+            soundCuesEnabled = prefs.getBoolean(KEY_SOUND_CUES, true),
+            vibrationEnabled = prefs.getBoolean(KEY_VIBRATION, true),
+            metronomeClickEnabled = prefs.getBoolean(KEY_METRONOME_CLICK, false)
+        )
+    )
     val hudState: StateFlow<ActiveWorkoutHudState> = _hudState.asStateFlow()
+
+    private val _pendingFinishState = MutableStateFlow(
+        PendingWorkoutFinishState(
+            selectedRpShiftDegrees = prefs.getInt(KEY_LAST_RP_SHIFT, 0)
+        )
+    )
+    val pendingFinishState: StateFlow<PendingWorkoutFinishState> = _pendingFinishState.asStateFlow()
 
     private val _ticketState = MutableStateFlow(TicketSessionTally())
     val ticketState: StateFlow<TicketSessionTally> = _ticketState.asStateFlow()
@@ -141,10 +165,8 @@ class CockpitViewModel(
     private val _selectedCalendarEpochDay = MutableStateFlow(currentEpochDay())
     val selectedCalendarEpochDay: StateFlow<Long> = _selectedCalendarEpochDay.asStateFlow()
 
-    // Custom quick step increments per exercise (defaults to +5 / +10 / +15 as requested)
-    private val _customStepsMap = MutableStateFlow<Map<CalisthenicsExercise, Triple<Int, Int, Int>>>(
-        CalisthenicsExercise.entries.associateWith { Triple(5, 10, 15) }
-    )
+    // Custom quick step increments per exercise persisted in SharedPreferences
+    private val _customStepsMap = MutableStateFlow(loadPersistedStepsMap())
     val customStepsMap: StateFlow<Map<CalisthenicsExercise, Triple<Int, Int, Int>>> = _customStepsMap.asStateFlow()
 
     val programsFlow: StateFlow<List<WorkoutProgram>> = repository.allProgramsFlow.stateIn(
@@ -188,7 +210,8 @@ class CockpitViewModel(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = CalisthenicsExercise.entries.map {
-            ExerciseVolumeSummary(it, 0, 0, 5, 10, 15)
+            val steps = _customStepsMap.value[it] ?: Triple(5, 10, 15)
+            ExerciseVolumeSummary(it, 0, 0, steps.first, steps.second, steps.third)
         }
     )
 
@@ -284,9 +307,12 @@ class CockpitViewModel(
     private var lastBeepedSecond: Int = -1
     private var completedStepsDurationSec: Int = 0
 
-    init {
-        viewModelScope.launch {
-            repository.seedInitialHistoryIfEmpty(currentEpochDay())
+    private fun loadPersistedStepsMap(): Map<CalisthenicsExercise, Triple<Int, Int, Int>> {
+        return CalisthenicsExercise.entries.associateWith { ex ->
+            val a = prefs.getInt("step_${ex.name}_A", 5).coerceIn(1, 200)
+            val b = prefs.getInt("step_${ex.name}_B", 10).coerceIn(1, 200)
+            val c = prefs.getInt("step_${ex.name}_C", 15).coerceIn(1, 200)
+            Triple(a, b, c)
         }
     }
 
@@ -390,13 +416,11 @@ class CockpitViewModel(
         if (!state.isActive) return
         val nowMs = SystemClock.elapsedRealtime()
         if (state.isPaused) {
-            // Resume
             stepTargetElapsedRealtimeMs = nowMs + pausedRemainingMs
             _hudState.update { it.copy(isPaused = false) }
             startMonotonicLoop()
             startMetronomeLoop()
         } else {
-            // Pause
             pausedRemainingMs = (stepTargetElapsedRealtimeMs - nowMs).coerceAtLeast(0L)
             timerJob?.cancel()
             metronomeJob?.cancel()
@@ -441,34 +465,61 @@ class CockpitViewModel(
         advanceToStep(state.currentStepIndex + 1)
     }
 
-    fun skipToPreviousStep() {
-        val state = _hudState.value
-        if (!state.isActive || state.currentStepIndex <= 0) return
-        val prevIdx = state.currentStepIndex - 1
-        val prevStep = state.flattenedSteps[prevIdx]
-        completedStepsDurationSec = (completedStepsDurationSec - prevStep.durationSec).coerceAtLeast(0)
-        advanceToStep(prevIdx, countCurrentCompleted = false)
-    }
-
     fun finishWorkoutEarly(saveToLog: Boolean = true) {
         val state = _hudState.value
         timerJob?.cancel()
         metronomeJob?.cancel()
 
         val actualElapsed = state.totalElapsedSec.coerceAtLeast(60)
+        _hudState.update { it.copy(isActive = false, isPaused = false) }
+
         if (saveToLog && state.isActive) {
-            viewModelScope.launch {
-                repository.logBikeSession(
-                    workoutId = state.program.id,
-                    workoutTitle = state.program.title,
-                    durationSec = actualElapsed,
-                    epochDay = currentEpochDay()
-                )
-            }
+            openWorkoutFinishSummary(
+                workoutId = state.program.id,
+                workoutTitle = state.program.title,
+                durationSec = actualElapsed
+            )
+        }
+    }
+
+    private fun openWorkoutFinishSummary(workoutId: String, workoutTitle: String, durationSec: Int) {
+        val savedRpShift = prefs.getInt(KEY_LAST_RP_SHIFT, 0)
+        _pendingFinishState.value = PendingWorkoutFinishState(
+            isVisible = true,
+            workoutId = workoutId,
+            workoutTitle = workoutTitle,
+            durationSec = durationSec,
+            selectedLegFeeling = "Плотно",
+            selectedRpShiftDegrees = savedRpShift
+        )
+    }
+
+    fun updatePendingLegFeeling(feeling: String) {
+        _pendingFinishState.update { it.copy(selectedLegFeeling = feeling) }
+    }
+
+    fun updatePendingRpShift(degrees: Int) {
+        _pendingFinishState.update { it.copy(selectedRpShiftDegrees = degrees) }
+    }
+
+    fun confirmWorkoutFinishAndOpenPostTicket() {
+        val summary = _pendingFinishState.value
+        if (!summary.isVisible) return
+
+        prefs.edit().putInt(KEY_LAST_RP_SHIFT, summary.selectedRpShiftDegrees).apply()
+
+        viewModelScope.launch {
+            repository.logBikeSession(
+                workoutId = summary.workoutId,
+                workoutTitle = summary.workoutTitle,
+                durationSec = summary.durationSec,
+                legFeeling = summary.selectedLegFeeling,
+                rpShiftDegrees = summary.selectedRpShiftDegrees,
+                epochDay = currentEpochDay()
+            )
         }
 
-        _hudState.update { it.copy(isActive = false, isPaused = false) }
-        // Show "Выходной билет" (Post-Workout Calisthenics Ticket)
+        _pendingFinishState.update { it.copy(isVisible = false) }
         _ticketState.value = TicketSessionTally(
             mode = TicketSheetMode.POST_WORKOUT,
             addedByExercise = emptyMap()
@@ -476,15 +527,21 @@ class CockpitViewModel(
     }
 
     fun toggleSoundCues() {
-        _hudState.update { it.copy(soundCuesEnabled = !it.soundCuesEnabled) }
+        val next = !_hudState.value.soundCuesEnabled
+        prefs.edit().putBoolean(KEY_SOUND_CUES, next).apply()
+        _hudState.update { it.copy(soundCuesEnabled = next) }
     }
 
     fun toggleVibration() {
-        _hudState.update { it.copy(vibrationEnabled = !it.vibrationEnabled) }
+        val next = !_hudState.value.vibrationEnabled
+        prefs.edit().putBoolean(KEY_VIBRATION, next).apply()
+        _hudState.update { it.copy(vibrationEnabled = next) }
     }
 
     fun toggleMetronomeClick() {
-        _hudState.update { it.copy(metronomeClickEnabled = !it.metronomeClickEnabled) }
+        val next = !_hudState.value.metronomeClickEnabled
+        prefs.edit().putBoolean(KEY_METRONOME_CLICK, next).apply()
+        _hudState.update { it.copy(metronomeClickEnabled = next) }
     }
 
     private fun startMonotonicLoop() {
@@ -511,7 +568,6 @@ class CockpitViewModel(
                         )
                     }
 
-                    // Show prominent delta banner during first 7 seconds of each phase
                     val showDelta = stepElapsed <= 7
 
                     _hudState.update {
@@ -533,7 +589,6 @@ class CockpitViewModel(
             while (_hudState.value.isActive && !_hudState.value.isPaused) {
                 val state = _hudState.value
                 val rpm = state.currentStep.targetRpmMid.coerceIn(50, 140)
-                // RPM is full pedal revolutions per minute -> 2 foot strokes per revolution (Left + Right)
                 val strokesPerMinute = rpm * 2
                 val intervalMs = (60_000L / strokesPerMinute).coerceAtLeast(200L)
 
@@ -555,7 +610,6 @@ class CockpitViewModel(
         }
 
         if (nextIndex >= state.flattenedSteps.size) {
-            // Workout complete!
             timerJob?.cancel()
             metronomeJob?.cancel()
             audioHapticEngine.triggerPhaseTransition(
@@ -563,18 +617,11 @@ class CockpitViewModel(
                 soundEnabled = state.soundCuesEnabled,
                 vibrationEnabled = state.vibrationEnabled
             )
-            viewModelScope.launch {
-                repository.logBikeSession(
-                    workoutId = state.program.id,
-                    workoutTitle = state.program.title,
-                    durationSec = state.totalWorkoutSec,
-                    epochDay = currentEpochDay()
-                )
-            }
             _hudState.update { it.copy(isActive = false, isPaused = false) }
-            _ticketState.value = TicketSessionTally(
-                mode = TicketSheetMode.POST_WORKOUT,
-                addedByExercise = emptyMap()
+            openWorkoutFinishSummary(
+                workoutId = state.program.id,
+                workoutTitle = state.program.title,
+                durationSec = state.totalWorkoutSec
             )
             return
         }
@@ -621,12 +668,16 @@ class CockpitViewModel(
     }
 
     fun updateCustomStepsForExercise(exercise: CalisthenicsExercise, stepA: Int, stepB: Int, stepC: Int) {
+        val cleanA = stepA.coerceIn(1, 200)
+        val cleanB = stepB.coerceIn(1, 200)
+        val cleanC = stepC.coerceIn(1, 200)
+        prefs.edit()
+            .putInt("step_${exercise.name}_A", cleanA)
+            .putInt("step_${exercise.name}_B", cleanB)
+            .putInt("step_${exercise.name}_C", cleanC)
+            .apply()
         _customStepsMap.update { current ->
-            current + (exercise to Triple(
-                stepA.coerceIn(1, 200),
-                stepB.coerceIn(1, 200),
-                stepC.coerceIn(1, 200)
-            ))
+            current + (exercise to Triple(cleanA, cleanB, cleanC))
         }
     }
 
@@ -649,7 +700,13 @@ class CockpitViewModel(
         }
     }
 
-    // Custom Workout Builder (Block-based with series repeat counts)
+    fun clearAllHistory() {
+        viewModelScope.launch {
+            repository.clearAllHistory()
+        }
+    }
+
+    // Custom Workout Builder
     fun openNewCustomWorkoutBuilder() {
         val template = WorkoutProgram(
             id = "custom_${UUID.randomUUID().toString().take(8)}",
@@ -708,6 +765,12 @@ class CockpitViewModel(
     }
 
     companion object {
+        private const val PREFS_NAME = "ovicx_q200_cockpit_prefs"
+        private const val KEY_SOUND_CUES = "sound_cues_enabled"
+        private const val KEY_VIBRATION = "vibration_enabled"
+        private const val KEY_METRONOME_CLICK = "metronome_click_enabled"
+        private const val KEY_LAST_RP_SHIFT = "last_rp_shift_degrees"
+
         fun currentEpochDay(): Long {
             val cal = Calendar.getInstance()
             val offsetMs = cal.timeZone.getOffset(cal.timeInMillis)

@@ -175,6 +175,8 @@ data class BikeSessionLogEntity(
     val workoutId: String,
     val workoutTitle: String,
     val durationSec: Int,
+    val legFeeling: String = "Плотно", // "Свежие", "Плотно", "Подзакислился"
+    val rpShiftDegrees: Int = 0,       // 0, 30, 45, 90 (shift of base RP shelf)
     val epochDay: Long,
     val completedAt: Long = System.currentTimeMillis()
 )

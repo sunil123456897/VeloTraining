@@ -136,4 +136,24 @@ interface CockpitDao {
 
     @Query("DELETE FROM band_max_sets WHERE id = :id")
     suspend fun deleteBandMaxSet(id: Long)
+
+    // =========================================================================
+    // 5. CLEAR ALL HISTORY
+    // =========================================================================
+
+    @Query("DELETE FROM bike_session_logs")
+    suspend fun deleteAllBikeSessions()
+
+    @Query("DELETE FROM calisthenics_logs")
+    suspend fun deleteAllCalisthenicsLogs()
+
+    @Query("DELETE FROM band_max_sets")
+    suspend fun deleteAllBandMaxSets()
+
+    @Transaction
+    suspend fun clearAllHistory() {
+        deleteAllBikeSessions()
+        deleteAllCalisthenicsLogs()
+        deleteAllBandMaxSets()
+    }
 }

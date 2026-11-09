@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -311,46 +312,62 @@ private fun ActiveCockpitHudView(
             dialSize = 142.dp
         )
 
-        // 4. CADENCE (RPM) & METRONOME BAR + NEXT PHASE BANNER (Last 5 seconds)
+        // 4. CADENCE (RPM) & METRONOME BAR + FIXED-HEIGHT NEXT PHASE PREVIEW (minHeight = 64.dp)
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Next Phase Banner (shows automatically during last 5 seconds or as compact preview)
-            AnimatedVisibility(
-                visible = hudState.isLastFiveSeconds && nextStep != null,
-                enter = fadeIn(),
-                exit = fadeOut()
+            val isUrgentCountdown = hudState.isLastFiveSeconds
+            val bannerBg = when {
+                nextStep == null -> RamsSurface
+                hudState.isLastThreeSeconds -> RamsAmberContainer
+                isUrgentCountdown -> RamsSageContainer
+                else -> RamsSurface
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 64.dp)
+                    .background(bannerBg, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .testTag("next_phase_banner"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 if (nextStep != null) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (hudState.isLastThreeSeconds) RamsAmberContainer else RamsSageContainer,
-                                RoundedCornerShape(8.dp)
-                            )
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
-                            .testTag("next_phase_banner"),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (hudState.isLastThreeSeconds) {
-                                    "ПРИГОТОВЬСЯ: ${hudState.stepRemainingSec}... СТАРТ!"
-                                } else {
-                                    "СЛЕДУЮЩАЯ ФАЗА ЧЕРЕЗ ${hudState.stepRemainingSec} СЕК"
-                                },
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                color = RamsAmberAttack
-                            )
-                            Text(
-                                text = "${nextStep.title} • ${nextStep.dialPosition.shortLabel} • ${nextStep.rpmRangeText}",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = RamsTextPrimary
-                            )
-                        }
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = nextStep.handPosition.label.substringBefore(" •"),
-                            style = MaterialTheme.typography.labelLarge,
+                            text = when {
+                                hudState.isLastThreeSeconds -> "ПРИГОТОВЬСЯ: ${hudState.stepRemainingSec}... СТАРТ!"
+                                isUrgentCountdown -> "СЛЕДУЮЩАЯ ФАЗА ЧЕРЕЗ ${hudState.stepRemainingSec} СЕК"
+                                else -> "СЛЕДУЮЩИЙ ШАГ ПО РАСПИСАНИЮ"
+                            },
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (isUrgentCountdown) RamsAmberAttack else RamsTextSecondary
+                        )
+                        Text(
+                            text = "${nextStep.title} • ${nextStep.dialPosition.shortLabel} • ${nextStep.rpmRangeText}",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (isUrgentCountdown) RamsTextPrimary else RamsTextSecondary
+                        )
+                    }
+                    Text(
+                        text = nextStep.handPosition.label.substringBefore(" •"),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (isUrgentCountdown) RamsAmberAttack else RamsTextMuted
+                    )
+                } else {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isUrgentCountdown) {
+                                "ФИНИШ ЧЕРЕЗ ${hudState.stepRemainingSec} СЕК"
+                            } else {
+                                "ФИНАЛЬНЫЙ ОТРЕЗОК ТРЕНИРОВКИ"
+                            },
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (isUrgentCountdown) RamsSageRecovery else RamsTextSecondary
+                        )
+                        Text(
+                            text = "После завершения откроется итог заезда и Выходной билет",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = RamsTextSecondary
                         )
                     }

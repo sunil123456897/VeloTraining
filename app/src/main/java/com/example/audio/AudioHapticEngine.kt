@@ -20,8 +20,10 @@ import kotlin.math.sin
 
 /**
  * Procedural audio & tactile feedback engine for the spin-bike cockpit.
- * Uses AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK so background YouTube or music ducks briefly
- * during 3-2-1-START cues without ever pausing playback.
+ * - Uses AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK on 3-2-1-START cues so background YouTube or music
+ *   ducks briefly without pausing playback.
+ * - Reuses two preloaded static AudioTrack instances (MODE_STATIC + reloadStaticData) for
+ *   left/right foot metronome ticks to avoid per-beat AudioTrack allocation.
  */
 class AudioHapticEngine(context: Context) {
 
@@ -42,6 +44,14 @@ class AudioHapticEngine(context: Context) {
         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
         .build()
 
+    private val metronomeLock = Any()
+    private val leftFootStaticTrack: AudioTrack? by lazy {
+        runCatching { createPreloadedStaticClickTrack(frequencyHz = 920.0, durationMs = 18, amplitude = 0.18f) }.getOrNull()
+    }
+    private val rightFootStaticTrack: AudioTrack? by lazy {
+        runCatching { createPreloadedStaticClickTrack(frequencyHz = 1100.0, durationMs = 18, amplitude = 0.18f) }.getOrNull()
+    }
+
     /**
      * Countdown 3 - 2 - 1 short crisp tone + light tactile pulse.
      */
@@ -51,8 +61,8 @@ class AudioHapticEngine(context: Context) {
         }
         if (soundEnabled) {
             val freq = when (secondsLeft) {
-                3 -> 784.0  // G5
-                2 -> 880.0  // A5
+                3 -> 784.0     // G5
+                2 -> 880.0     // A5
                 else -> 987.77 // B5
             }
             playDuckingTone(frequencyHz = freq, durationMs = 95, amplitude = 0.65f)
@@ -60,7 +70,7 @@ class AudioHapticEngine(context: Context) {
     }
 
     /**
-     * Phase transition ("СТАРТ" / new dial angle) double tone + strong distinct vibration pattern.
+     * Phase transition ("СТАРТ" / new dial angle) tone + distinct vibration pattern.
      */
     fun triggerPhaseTransition(isAttackPhase: Boolean, soundEnabled: Boolean, vibrationEnabled: Boolean) {
         if (vibrationEnabled) {
@@ -77,15 +87,47 @@ class AudioHapticEngine(context: Context) {
     }
 
     /**
-     * Subtle soft click for RPM cadence metronome (does not request audio ducking so music stays untouched).
+     * Reuses preloaded MODE_STATIC AudioTrack instances for Left and Right pedal strokes.
      */
     fun triggerMetronomeTick(isRightFoot: Boolean) {
         engineScope.launch {
-            runCatching {
-                val freq = if (isRightFoot) 1100.0 else 920.0
-                playRawPcmTone(frequencyHz = freq, durationMs = 18, amplitude = 0.18f)
+            synchronized(metronomeLock) {
+                runCatching {
+                    val track = if (isRightFoot) rightFootStaticTrack else leftFootStaticTrack
+                    if (track != null && track.state == AudioTrack.STATE_INITIALIZED) {
+                        if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                            track.stop()
+                        }
+                        track.reloadStaticData()
+                        track.play()
+                    }
+                }
             }
         }
+    }
+
+    private fun createPreloadedStaticClickTrack(
+        frequencyHz: Double,
+        durationMs: Int,
+        amplitude: Float
+    ): AudioTrack {
+        val sampleRate = 24000
+        val pcmBuffer = synthesizePcmBuffer(sampleRate, frequencyHz, durationMs, amplitude)
+        val byteCount = pcmBuffer.size * 2
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(audioAttributes)
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(byteCount.coerceAtLeast(512))
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .build()
+        track.write(pcmBuffer, 0, pcmBuffer.size)
+        return track
     }
 
     private fun playDuckingTone(frequencyHz: Double, durationMs: Int, amplitude: Float) {
@@ -109,7 +151,7 @@ class AudioHapticEngine(context: Context) {
                 }
 
                 playRawPcmTone(frequencyHz = frequencyHz, durationMs = durationMs, amplitude = amplitude)
-                delay(durationMs.toLong() + 40L)
+                delay(40L)
             } catch (_: Throwable) {
                 // Ignore audio hardware failures in headless/emulator environments
             } finally {
@@ -126,23 +168,10 @@ class AudioHapticEngine(context: Context) {
         }
     }
 
-    private fun playRawPcmTone(frequencyHz: Double, durationMs: Int, amplitude: Float) {
+    private suspend fun playRawPcmTone(frequencyHz: Double, durationMs: Int, amplitude: Float) {
         val sampleRate = 24000
-        val numSamples = ((durationMs / 1000.0) * sampleRate).toInt().coerceAtLeast(64)
-        val pcmBuffer = ShortArray(numSamples)
-        val fadeSamples = (numSamples * 0.15).toInt().coerceAtLeast(8)
-
-        for (i in 0 until numSamples) {
-            val env = when {
-                i < fadeSamples -> i.toFloat() / fadeSamples
-                i > numSamples - fadeSamples -> (numSamples - i).toFloat() / fadeSamples
-                else -> 1f
-            }
-            val sample = sin(2.0 * PI * i * frequencyHz / sampleRate)
-            pcmBuffer[i] = (sample * Short.MAX_VALUE * amplitude * env).toInt().toShort()
-        }
-
-        val byteCount = numSamples * 2
+        val pcmBuffer = synthesizePcmBuffer(sampleRate, frequencyHz, durationMs, amplitude)
+        val byteCount = pcmBuffer.size * 2
         val track = AudioTrack.Builder()
             .setAudioAttributes(audioAttributes)
             .setAudioFormat(
@@ -156,11 +185,36 @@ class AudioHapticEngine(context: Context) {
             .setTransferMode(AudioTrack.MODE_STATIC)
             .build()
 
-        track.write(pcmBuffer, 0, numSamples)
-        track.play()
-        Thread.sleep(durationMs.toLong() + 25L)
-        track.stop()
-        track.release()
+        try {
+            track.write(pcmBuffer, 0, pcmBuffer.size)
+            track.play()
+            delay(durationMs.toLong() + 25L)
+            track.stop()
+        } finally {
+            track.release()
+        }
+    }
+
+    private fun synthesizePcmBuffer(
+        sampleRate: Int,
+        frequencyHz: Double,
+        durationMs: Int,
+        amplitude: Float
+    ): ShortArray {
+        val numSamples = ((durationMs / 1000.0) * sampleRate).toInt().coerceAtLeast(64)
+        val pcmBuffer = ShortArray(numSamples)
+        val fadeSamples = (numSamples * 0.15).toInt().coerceAtLeast(8)
+
+        for (i in 0 until numSamples) {
+            val env = when {
+                i < fadeSamples -> i.toFloat() / fadeSamples
+                i > numSamples - fadeSamples -> (numSamples - i).toFloat() / fadeSamples
+                else -> 1f
+            }
+            val sample = sin(2.0 * PI * i * frequencyHz / sampleRate)
+            pcmBuffer[i] = (sample * Short.MAX_VALUE * amplitude * env).toInt().toShort()
+        }
+        return pcmBuffer
     }
 
     private fun vibrateOneShot(durationMs: Long, amplitude: Int) {

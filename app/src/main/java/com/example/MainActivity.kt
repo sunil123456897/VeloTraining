@@ -35,6 +35,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.CockpitViewModel
 import com.example.ui.components.TicketBottomSheet
 import com.example.ui.components.WorkoutBuilderScreen
+import com.example.ui.components.WorkoutFinishSummarySheet
 import com.example.ui.screens.CalisthenicsScreen
 import com.example.ui.screens.CockpitScreen
 import com.example.ui.screens.HistoryCalibrationScreen
@@ -74,7 +75,9 @@ fun OvicxCockpitApp(viewModel: CockpitViewModel) {
     val programs by viewModel.programsFlow.collectAsStateWithLifecycle()
     val selectedProgram by viewModel.selectedProgramFlow.collectAsStateWithLifecycle()
     val hudState by viewModel.hudState.collectAsStateWithLifecycle()
+    val pendingFinishState by viewModel.pendingFinishState.collectAsStateWithLifecycle()
     val ticketState by viewModel.ticketState.collectAsStateWithLifecycle()
+    val customStepsMap by viewModel.customStepsMap.collectAsStateWithLifecycle()
     val editingProgram by viewModel.editingProgram.collectAsStateWithLifecycle()
 
     val calisthenicsSummaries by viewModel.calisthenicsSummaryFlow.collectAsStateWithLifecycle()
@@ -84,14 +87,12 @@ fun OvicxCockpitApp(viewModel: CockpitViewModel) {
     val calendar28Days by viewModel.calendar28DaysFlow.collectAsStateWithLifecycle()
     val selectedCalendarDay by viewModel.selectedCalendarEpochDay.collectAsStateWithLifecycle()
 
-    // Handle back button on secondary tabs
     if (currentTab != CockpitTab.COCKPIT) {
         BackHandler {
             currentTab = CockpitTab.COCKPIT
         }
     }
 
-    // If custom workout builder is open, display it full screen
     val programBeingEdited = editingProgram
     if (programBeingEdited != null) {
         Scaffold(
@@ -118,7 +119,6 @@ fun OvicxCockpitApp(viewModel: CockpitViewModel) {
         contentWindowInsets = WindowInsets.safeDrawing,
         containerColor = RamsBackground,
         bottomBar = {
-            // Hide bottom navigation during active spin-bike HUD so wet hands never accidentally switch tabs
             if (!hudState.isActive) {
                 NavigationBar(
                     containerColor = RamsSurface,
@@ -249,14 +249,24 @@ fun OvicxCockpitApp(viewModel: CockpitViewModel) {
                     HistoryCalibrationScreen(
                         calendar28Days = calendar28Days,
                         selectedEpochDay = selectedCalendarDay,
-                        onSelectDay = { viewModel.selectCalendarDay(it) }
+                        onSelectDay = { viewModel.selectCalendarDay(it) },
+                        onClearAllHistory = { viewModel.clearAllHistory() }
                     )
                 }
             }
 
+            // Post-workout Finish Summary (leg sensation & base RP shift) before Post-Workout Ticket
+            WorkoutFinishSummarySheet(
+                finishState = pendingFinishState,
+                onSelectLegFeeling = { viewModel.updatePendingLegFeeling(it) },
+                onSelectRpShift = { viewModel.updatePendingRpShift(it) },
+                onConfirmAndProceedToTicket = { viewModel.confirmWorkoutFinishAndOpenPostTicket() }
+            )
+
             // Pre-workout / Post-workout "Входной / Выходной билет" Bottom Sheet
             TicketBottomSheet(
                 ticketState = ticketState,
+                customStepsMap = customStepsMap,
                 onAddReps = { exercise, reps ->
                     viewModel.addTicketCalisthenics(exercise, reps)
                 },

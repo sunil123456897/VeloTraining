@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -30,24 +31,171 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.model.CalisthenicsExercise
+import com.example.ui.PendingWorkoutFinishState
 import com.example.ui.TicketSessionTally
 import com.example.ui.TicketSheetMode
 import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.RamsAmberAttack
+import com.example.ui.theme.RamsAmberContainer
 import com.example.ui.theme.RamsBackground
-import com.example.ui.theme.RamsOutline
 import com.example.ui.theme.RamsSageContainer
 import com.example.ui.theme.RamsSageRecovery
 import com.example.ui.theme.RamsSurface
 import com.example.ui.theme.RamsSurfaceElevated
 import com.example.ui.theme.RamsTextPrimary
 import com.example.ui.theme.RamsTextSecondary
-import androidx.compose.material3.MaterialTheme
+import com.example.ui.theme.RamsWarmYellow
+
+/**
+ * Post-ride finish summary sheet shown right before the Post-Workout Calisthenics Ticket.
+ * Lets the user record leg sensation in 1 tap ("Свежие", "Плотно", "Подзакислился")
+ * and current shift of base RP shelf (0°, +30°, +45°, +90°).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun WorkoutFinishSummarySheet(
+    finishState: PendingWorkoutFinishState,
+    onSelectLegFeeling: (String) -> Unit,
+    onSelectRpShift: (Int) -> Unit,
+    onConfirmAndProceedToTicket: () -> Unit
+) {
+    if (!finishState.isVisible) return
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val durationMin = (finishState.durationSec + 30) / 60
+
+    ModalBottomSheet(
+        onDismissRequest = onConfirmAndProceedToTicket,
+        sheetState = sheetState,
+        containerColor = RamsSurface,
+        contentColor = RamsTextPrimary
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 10.dp)
+                .testTag("workout_finish_summary_sheet"),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "ИТОГ ЗАЕЗДА • ФИКСАЦИЯ СОСТОЯНИЯ",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = RamsAmberAttack
+                )
+                Text(
+                    text = "${finishState.workoutTitle} ($durationMin мин)",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = RamsTextPrimary
+                )
+            }
+
+            // 1. Leg feeling 1-tap selector
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Ощущение в ногах после заезда:",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = RamsTextSecondary
+                )
+                val feelings = listOf("Свежие", "Плотно", "Подзакислился")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    feelings.forEach { feeling ->
+                        val isSelected = finishState.selectedLegFeeling == feeling
+                        val activeColor = when (feeling) {
+                            "Свежие" -> RamsSageRecovery
+                            "Плотно" -> RamsAmberAttack
+                            else -> RamsWarmYellow
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) activeColor else RamsBackground)
+                                .clickable { onSelectLegFeeling(feeling) }
+                                .testTag("leg_feeling_$feeling"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = feeling,
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                                color = if (isSelected) RamsBackground else RamsTextPrimary
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 2. Base RP shelf shift selector (0°, +30°, +45°, +90°)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Текущий сдвиг моей базовой полки РП (от 1-й калибровки):",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = RamsTextSecondary
+                )
+                val rpShifts = listOf(0, 30, 45, 90)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    rpShifts.forEach { shiftDeg ->
+                        val isSelected = finishState.selectedRpShiftDegrees == shiftDeg
+                        val label = if (shiftDeg == 0) "0° (База)" else "+${shiftDeg}°"
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) RamsSageContainer else RamsBackground)
+                                .clickable { onSelectRpShift(shiftDeg) }
+                                .testTag("rp_shift_$shiftDeg"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontFamily = JetBrainsMonoFamily,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = if (isSelected) RamsSageRecovery else RamsTextPrimary
+                            )
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = onConfirmAndProceedToTicket,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .testTag("confirm_workout_finish_button"),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = RamsAmberAttack,
+                    contentColor = RamsBackground
+                )
+            ) {
+                Text(
+                    text = "СОХРАНИТЬ ЗАЕЗД → ВЫХОДНОЙ БИЛЕТ",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TicketBottomSheet(
     ticketState: TicketSessionTally,
+    customStepsMap: Map<CalisthenicsExercise, Triple<Int, Int, Int>>,
     onAddReps: (CalisthenicsExercise, Int) -> Unit,
     onDismissAndProceed: () -> Unit
 ) {
@@ -70,7 +218,6 @@ fun TicketBottomSheet(
                 .testTag("ticket_bottom_sheet"),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -100,12 +247,12 @@ fun TicketBottomSheet(
                 color = RamsTextPrimary
             )
 
-            // All 4 exercises with +5 / +10 / +15 buttons right in the sheet
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 CalisthenicsExercise.entries.forEach { exercise ->
                     val addedNow = ticketState.addedByExercise[exercise] ?: 0
+                    val steps = customStepsMap[exercise] ?: Triple(5, 10, 15)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -128,7 +275,7 @@ fun TicketBottomSheet(
                         }
 
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(5, 10, 15).forEach { step ->
+                            listOf(steps.first, steps.second, steps.third).forEach { step ->
                                 Box(
                                     modifier = Modifier
                                         .height(48.dp)
@@ -157,7 +304,6 @@ fun TicketBottomSheet(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Primary action or 1-tap skip
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)

@@ -16,9 +16,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,7 +40,6 @@ import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.RamsAmberAttack
 import com.example.ui.theme.RamsAmberContainer
 import com.example.ui.theme.RamsBackground
-import com.example.ui.theme.RamsOutline
 import com.example.ui.theme.RamsSageContainer
 import com.example.ui.theme.RamsSageRecovery
 import com.example.ui.theme.RamsSurface
@@ -47,8 +53,11 @@ import com.example.ui.theme.RamsWarmYellow
 fun HistoryCalibrationScreen(
     calendar28Days: List<DayActivityCell>,
     selectedEpochDay: Long,
-    onSelectDay: (Long) -> Unit
+    onSelectDay: (Long) -> Unit,
+    onClearAllHistory: () -> Unit
 ) {
+    var showClearConfirmDialog by remember { mutableStateOf(false) }
+
     val selectedCell = calendar28Days.find { it.epochDay == selectedEpochDay }
         ?: calendar28Days.lastOrNull()
 
@@ -177,7 +186,58 @@ fun HistoryCalibrationScreen(
             }
         }
 
-        item { Spacer(modifier = Modifier.height(24.dp)) }
+        // 4. Small Clear All History button at the bottom with confirmation
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                OutlinedButton(
+                    onClick = { showClearConfirmDialog = true },
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("clear_all_history_button")
+                ) {
+                    Text(
+                        text = "Очистить всю историю",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = RamsTextSecondary
+                    )
+                }
+            }
+        }
+    }
+
+    if (showClearConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmDialog = false },
+            containerColor = RamsSurface,
+            titleContentColor = RamsTextPrimary,
+            textContentColor = RamsTextSecondary,
+            title = {
+                Text("Очистить всю историю?")
+            },
+            text = {
+                Text("Все записи велотренировок, дневного объёма калистеники и подходов с резинкой будут удалены. Пользовательские схемы тренировок останутся.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClearAllHistory()
+                        showClearConfirmDialog = false
+                    },
+                    modifier = Modifier.testTag("confirm_clear_history_button")
+                ) {
+                    Text("ОЧИСТИТЬ", color = RamsAmberAttack)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmDialog = false }) {
+                    Text("ОТМЕНА", color = RamsTextSecondary)
+                }
+            }
+        )
     }
 }
 
@@ -263,7 +323,6 @@ private fun CalendarDayGridCell(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Day of Month + Day of Week
         Text(
             text = "${cell.dayOfMonth} ${cell.dayOfWeekShort}",
             style = MaterialTheme.typography.labelMedium.copy(
@@ -274,7 +333,6 @@ private fun CalendarDayGridCell(
             maxLines = 1
         )
 
-        // Calisthenics Volume Number
         Text(
             text = if (cell.totalCalisthenicsReps > 0) "${cell.totalCalisthenicsReps}" else "—",
             style = MaterialTheme.typography.labelLarge.copy(
@@ -286,7 +344,6 @@ private fun CalendarDayGridCell(
             textAlign = TextAlign.Center
         )
 
-        // Activity Dots Row (Bike + Calisthenics + Band)
         Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -359,19 +416,30 @@ private fun SelectedDayDetailCard(cell: DayActivityCell) {
         } else {
             cell.bikeSessions.forEach { bike ->
                 val min = (bike.durationSec + 30) / 60
-                Row(
+                val rpShiftText = if (bike.rpShiftDegrees > 0) "+${bike.rpShiftDegrees}°" else "0° (База)"
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Вело: ${bike.workoutTitle}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = RamsAmberAttack
+                        )
+                        Text(
+                            text = "$min мин",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = RamsTextPrimary
+                        )
+                    }
                     Text(
-                        text = "Вело: ${bike.workoutTitle}",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = RamsAmberAttack
-                    )
-                    Text(
-                        text = "$min мин",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = RamsTextPrimary
+                        text = "Ноги: ${bike.legFeeling}  •  Сдвиг полки РП: $rpShiftText",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = RamsTextSecondary
                     )
                 }
             }

@@ -175,7 +175,7 @@ fun CalisthenicsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "$exTitle  •  +$log.reps повт. ($sourceLabel)",
+                                text = "$exTitle  •  +${log.reps} повт. ($sourceLabel)",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = RamsTextPrimary
                             )

@@ -44,12 +44,21 @@ class CockpitRepository(private val dao: CockpitDao) {
         dao.deleteCustomWorkout(id)
     }
 
-    suspend fun logBikeSession(workoutId: String, workoutTitle: String, durationSec: Int, epochDay: Long) {
+    suspend fun logBikeSession(
+        workoutId: String,
+        workoutTitle: String,
+        durationSec: Int,
+        legFeeling: String,
+        rpShiftDegrees: Int,
+        epochDay: Long
+    ) {
         dao.insertBikeSession(
             BikeSessionLogEntity(
                 workoutId = workoutId,
                 workoutTitle = workoutTitle,
                 durationSec = durationSec,
+                legFeeling = legFeeling,
+                rpShiftDegrees = rpShiftDegrees,
                 epochDay = epochDay
             )
         )
@@ -95,95 +104,15 @@ class CockpitRepository(private val dao: CockpitDao) {
         dao.deleteBandMaxSet(id)
     }
 
+    suspend fun clearAllHistory() {
+        dao.clearAllHistory()
+    }
+
+    /**
+     * Kept as a no-op so statistics start from a clean zero on first launch.
+     */
+    @Suppress("UNUSED_PARAMETER")
     suspend fun seedInitialHistoryIfEmpty(todayEpochDay: Long) {
-        if (dao.countBikeSessions() == 0 && dao.countCalisthenicsLogs() == 0) {
-            val dayMs = 86_400_000L
-            val now = System.currentTimeMillis()
-
-            val sampleBikeDays = listOf(
-                Triple(todayEpochDay - 11, "preset_machinegun_20_40", "Пулемёт 20 / 40"),
-                Triple(todayEpochDay - 9, "preset_capillary_flush", "Капиллярная промывка после ОФП"),
-                Triple(todayEpochDay - 6, "preset_reactor_30_30", "Реактор 30 / 30 на одном винте"),
-                Triple(todayEpochDay - 4, "preset_sub_pano_4x6", "Суб-ПАНО Крейсер 4 × 6"),
-                Triple(todayEpochDay - 2, "preset_ladder_60_40_20", "Рваная лесенка 60 – 40 – 20")
-            )
-            sampleBikeDays.forEach { (day, id, title) ->
-                val diffDays = (todayEpochDay - day).coerceAtLeast(1)
-                dao.insertBikeSession(
-                    BikeSessionLogEntity(
-                        workoutId = id,
-                        workoutTitle = title,
-                        durationSec = 26 * 60,
-                        epochDay = day,
-                        completedAt = now - diffDays * dayMs
-                    )
-                )
-            }
-
-            val calisthenicsSeed = listOf(
-                Triple(todayEpochDay - 6, CalisthenicsExercise.PULL_UPS, 25),
-                Triple(todayEpochDay - 6, CalisthenicsExercise.PUSH_UPS, 50),
-                Triple(todayEpochDay - 5, CalisthenicsExercise.SQUATS, 60),
-                Triple(todayEpochDay - 5, CalisthenicsExercise.CALF_RAISES, 80),
-                Triple(todayEpochDay - 4, CalisthenicsExercise.PULL_UPS, 30),
-                Triple(todayEpochDay - 4, CalisthenicsExercise.PUSH_UPS, 60),
-                Triple(todayEpochDay - 3, CalisthenicsExercise.SQUATS, 75),
-                Triple(todayEpochDay - 2, CalisthenicsExercise.PULL_UPS, 35),
-                Triple(todayEpochDay - 2, CalisthenicsExercise.CALF_RAISES, 90),
-                Triple(todayEpochDay - 1, CalisthenicsExercise.PUSH_UPS, 45),
-                Triple(todayEpochDay - 1, CalisthenicsExercise.SQUATS, 50),
-                Triple(todayEpochDay, CalisthenicsExercise.PULL_UPS, 10),
-                Triple(todayEpochDay, CalisthenicsExercise.PUSH_UPS, 20)
-            )
-            calisthenicsSeed.forEachIndexed { idx, (day, ex, reps) ->
-                val diffDays = (todayEpochDay - day).coerceAtLeast(0)
-                dao.insertCalisthenicsLog(
-                    CalisthenicsLogEntity(
-                        exerciseName = ex.name,
-                        reps = reps,
-                        sourceTag = if (idx % 2 == 0) "PRE_TICKET" else "QUICK_ADD",
-                        epochDay = day,
-                        createdAt = now - diffDays * dayMs + idx * 1000L
-                    )
-                )
-            }
-
-            dao.insertBandMaxSet(
-                BandMaxSetEntity(
-                    exerciseType = BandExerciseType.BAND_PULL_UPS.name,
-                    bandDescription = "Фиолетовая 15–30 кг",
-                    reps = 22,
-                    epochDay = todayEpochDay - 9,
-                    createdAt = now - 9 * dayMs
-                )
-            )
-            dao.insertBandMaxSet(
-                BandMaxSetEntity(
-                    exerciseType = BandExerciseType.BAND_PULL_UPS.name,
-                    bandDescription = "Фиолетовая 15–30 кг",
-                    reps = 26,
-                    epochDay = todayEpochDay - 4,
-                    createdAt = now - 4 * dayMs
-                )
-            )
-            dao.insertBandMaxSet(
-                BandMaxSetEntity(
-                    exerciseType = BandExerciseType.BAND_PUSH_UPS.name,
-                    bandDescription = "Красная 10–20 кг",
-                    reps = 34,
-                    epochDay = todayEpochDay - 7,
-                    createdAt = now - 7 * dayMs
-                )
-            )
-            dao.insertBandMaxSet(
-                BandMaxSetEntity(
-                    exerciseType = BandExerciseType.BAND_PUSH_UPS.name,
-                    bandDescription = "Красная 10–20 кг",
-                    reps = 38,
-                    epochDay = todayEpochDay - 3,
-                    createdAt = now - 3 * dayMs
-                )
-            )
-        }
+        // Intentionally empty: user statistics start from clean zero
     }
 }

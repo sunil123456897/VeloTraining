@@ -15,7 +15,7 @@ import androidx.room.TypeConverters
         CalisthenicsLogEntity::class,
         BandMaxSetEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(CockpitTypeConverters::class)
